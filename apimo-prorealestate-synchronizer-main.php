@@ -81,18 +81,29 @@ class ApimoProrealestateSynchronizer
    */
   public function synchronize()
   {
-    // Gets the properties
-    $return = $this->callApimoAPI(
-      'https://api.apimo.pro/agencies/'
-      . get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_agency']
-      . '/properties',
-      'GET'
-    );
+    $limit = 100;
+    $offset = 0;
+    $totalItems = 0;
+    do {
+      // Gets the properties
+      $return = $this->callApimoAPI(
+        'https://api.apimo.pro/agencies/'
+        . get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_agency']
+        . '/properties',
+        'GET',
+        [
+          "limit" => $limit,
+          "offset" => $offset
+        ]
+      );
 
-    // Parses the JSON into an array of properties object
-    $jsonBody = json_decode($return['body']);
+      // Parses the JSON into an array of properties object
+      $jsonBody = json_decode($return['body']);
 
-    if (is_object($jsonBody) && isset($jsonBody->properties)) {
+      if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
+        return;
+      }
+
       $properties = $jsonBody->properties;
 
       if (is_array($properties)) {
@@ -108,7 +119,14 @@ class ApimoProrealestateSynchronizer
 
         $this->deleteOldListingPost($properties);
       }
-    }
+
+      if(!isset($jsonBody->total_items)){
+        return;
+      }
+
+      $offset += $limit;
+      $totalItems = $jsonBody->total_items;
+    } while ($totalItems > $offset);
   }
 
   /**
