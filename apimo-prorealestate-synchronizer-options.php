@@ -93,6 +93,15 @@ class ApimoProrealestateSynchronizerSettingsPage
             'apimo-prorealestate-synchronizer-settings',
             'apimo_prorealestate_synchronizer_settings_options_group_section'
         );
+
+        add_settings_field(
+            'apimo_data_limit',
+            'Limit',
+            array($this, 'limit_callback'),
+            'apimo-prorealestate-synchronizer-settings',
+            'apimo_prorealestate_synchronizer_settings_options_group_section'
+        );
+
     }
 
     /**
@@ -111,6 +120,9 @@ class ApimoProrealestateSynchronizerSettingsPage
 
         if (isset($input['apimo_api_agency']))
             $new_input['apimo_api_agency'] = sanitize_text_field($input['apimo_api_agency']);
+
+        if (isset($input['apimo_data_limit']))
+            $new_input['apimo_data_limit'] = sanitize_text_field($input['apimo_data_limit']);
 
         return $new_input;
     }
@@ -147,6 +159,14 @@ class ApimoProrealestateSynchronizerSettingsPage
         printf(
             '<input type="text" id="apimo_api_agency" name="apimo_prorealestate_synchronizer_settings_options[apimo_api_agency]" value="%s" />',
             isset($this->options['apimo_api_agency']) ? esc_attr($this->options['apimo_api_agency']) : ''
+        );
+    }
+
+    public function limit_callback()
+    {
+        printf(
+            '<input type="number" id="apimo_data_limit" name="apimo_prorealestate_synchronizer_settings_options[apimo_data_limit]" value="%s" />',
+            isset($this->options['apimo_data_limit']) ? esc_attr($this->options['apimo_data_limit']) : '10'
         );
     }
 }

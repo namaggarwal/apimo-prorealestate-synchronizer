@@ -36,10 +36,13 @@ class ApimoProrealestateSynchronizer
 
     // Trigger the synchronizer event every hour only if the API settings have been configured
     if (is_array(get_option('apimo_prorealestate_synchronizer_settings_options'))) {
-      if (isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_provider']) &&
+      if (
+        isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_provider']) &&
         isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_token']) &&
-        isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_agency'])
+        isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_agency']) &&
+        isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_limit'])
       ) {
+        add_filter('cron_schedules', array($this, 'my_cron_schedules'));
         add_action(
           'apimo_prorealestate_synchronizer_hourly_event',
           array($this, 'synchronize')
@@ -74,6 +77,57 @@ class ApimoProrealestateSynchronizer
     return self::$instance;
   }
 
+
+  public function my_cron_schedules($schedules)
+  {
+    if (!isset($schedules["2min"])) {
+      $schedules["2min"] = array(
+        'interval' => 2 * 60,
+        'display' => __('Once every 2 minutes')
+      );
+    }
+
+    if (!isset($schedules["10min"])) {
+      $schedules["10min"] = array(
+        'interval' => 10 * 60,
+        'display' => __('Once every 10 minutes')
+      );
+    }
+    return $schedules;
+  }
+
+  private function getAPIMOData()
+  {
+    $data = get_transient('apimo_cached_data');
+
+    if ($data) {
+      return $data;
+    }
+
+    $limit = 3000;
+    // Gets the properties
+    $return = $this->callApimoAPI(
+      'https://api.apimo.pro/agencies/'
+        . get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_agency']
+        . '/properties',
+      'GET',
+      [
+        "limit" => $limit
+      ]
+    );
+
+    // Parses the JSON into an array of properties object
+    $jsonBody = json_decode($return['body']);
+
+    if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
+      return $jsonBody;
+    }
+
+    set_transient('apimo_cached_data', $jsonBody, 7200);
+
+    return $jsonBody;
+  }
+
   /**
    * Synchronizes Apimo and Pro Real Estate plugnins estates
    *
@@ -81,52 +135,44 @@ class ApimoProrealestateSynchronizer
    */
   public function synchronize()
   {
-    $limit = 100;
-    $offset = 0;
-    $totalItems = 0;
-    do {
-      // Gets the properties
-      $return = $this->callApimoAPI(
-        'https://api.apimo.pro/agencies/'
-        . get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_agency']
-        . '/properties',
-        'GET',
-        [
-          "limit" => $limit,
-          "offset" => $offset
-        ]
-      );
+    set_time_limit(180);
 
-      // Parses the JSON into an array of properties object
-      $jsonBody = json_decode($return['body']);
+    $jsonBody = $this->getAPIMOData();
 
-      if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
-        return;
-      }
+    if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
+      return;
+    }
 
-      $properties = $jsonBody->properties;
+    $properties = $jsonBody->properties;
+    $propertyIDs = array();
+    $dataOffset = get_option('apimo_data_offset', 0);
+    $dataLimit = get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_limit'];
 
-      if (is_array($properties)) {
-        foreach ($properties as $property) {
-          // Parse the property object
-          $data = $this->parseJSONOutput($property);
-
-          if (null !== $data) {
-            // Creates or updates a listing
-            $this->manageListingPost($data);
-          }
+    if (is_array($properties)) {
+      $updateProperties = array_slice($properties, $dataOffset, $dataLimit);
+      foreach ($updateProperties as $property) {
+        // Parse the property object
+        $data = $this->parseJSONOutput($property);
+        if (null !== $data) {
+          // Creates or updates a listing
+          $this->manageListingPost($data);
         }
-
-        $this->deleteOldListingPost($properties);
       }
 
-      if(!isset($jsonBody->total_items)){
-        return;
+      foreach ($properties as $property) {
+        $propertyIDs[] = $property->id;
       }
 
-      $offset += $limit;
-      $totalItems = $jsonBody->total_items;
-    } while ($totalItems > $offset);
+      $this->deleteOldListingPost($propertyIDs);
+
+      $totalListings = count($propertyIDs);
+      $dataOffset += $dataLimit;
+      if ($dataOffset >= $totalListings) {
+        $dataOffset = 0;
+      }
+
+      update_option('apimo_data_offset', $dataOffset);
+    }
   }
 
   /**
@@ -151,11 +197,9 @@ class ApimoProrealestateSynchronizer
       'customMetaSqFt' => preg_replace('#,#', '.', $property->area->value),
       'customMetaVideoURL' => '',
       'customMetaMLS' => $property->id,
-      'customMetaLatLng' => (
-      $property->latitude && $property->longitude
+      'customMetaLatLng' => ($property->latitude && $property->longitude
         ? $property->latitude . ', ' . $property->longitude
-        : ''
-      ),
+        : ''),
       'customMetaExpireListing' => '',
       'ct_property_type' => $property->type,
       'rooms' => 0,
@@ -180,12 +224,14 @@ class ApimoProrealestateSynchronizer
     $data['beds'] = $property->bedrooms;
 
     foreach ($property->areas as $area) {
-      if ($area->type == 1 ||
+      if (
+        $area->type == 1 ||
         $area->type == 53 ||
         $area->type == 70
       ) {
         $data['customTaxBeds'] += $area->number;
-      } else if ($area->type == 8 ||
+      } else if (
+        $area->type == 8 ||
         $area->type == 41 ||
         $area->type == 13 ||
         $area->type == 42
@@ -266,8 +312,7 @@ class ApimoProrealestateSynchronizer
       if (NULL === $post) {
         // Insert post and retrieve postId
         $postId = wp_insert_post($postInformation);
-      }
-      else {
+      } else {
         // Verifies if the property is not to old to be added
         if (strtotime($postUpdatedAt) >= strtotime('-5 days')) {
           return;
@@ -285,8 +330,10 @@ class ApimoProrealestateSynchronizer
       foreach ($attachments as $attachment) {
         $imageStillPresent = false;
         foreach ($images as $image) {
-          if ($attachment->post_content == $image['id'] &&
-            $this->getFileNameFromURL($attachment->guid) == $this->getFileNameFromURL($image['url'])) {
+          if (
+            $attachment->post_content == $image['id'] &&
+            $this->getFileNameFromURL($attachment->guid) == $this->getFileNameFromURL($image['url'])
+          ) {
             $imageStillPresent = true;
           }
         }
@@ -304,7 +351,7 @@ class ApimoProrealestateSynchronizer
 
         // If the media does not exist, upload it
         if (!$media) {
-          media_sideload_image($image['url'], $postId);
+          $media_res = media_sideload_image($image['url'], $postId);
 
           // Retrieve the last inserted media
           $args = array(
@@ -371,15 +418,8 @@ class ApimoProrealestateSynchronizer
    *
    * @param $properties
    */
-  private function deleteOldListingPost($properties)
+  private function deleteOldListingPost($propertyIDs)
   {
-    $parsedProperties = array();
-
-    // Parse once for all the properties
-    foreach ($properties as $property) {
-      $parsedProperties[] = $this->parseJSONOutput($property);
-    }
-
     // Retrieve the current posts
     $posts = get_posts(array(
       'post_type' => 'listings',
@@ -387,26 +427,8 @@ class ApimoProrealestateSynchronizer
     ));
 
     foreach ($posts as $post) {
-      $postMustBeRemoved = true;
-
-      // Verifies if the post exists
-      foreach ($parsedProperties as $property) {
-        $postTitle = $property['postTitle'][$this->siteLanguage];
-        if ($postTitle == '') {
-          foreach ($property['postTitle'] as $lang => $title) {
-            $postTitle = $title;
-          }
-        }
-
-        if ($postTitle == $post->post_title) {
-          $postMustBeRemoved = false;
-          break;
-        }
-      }
-
-      // If not, we can execute the action
-      if ($postMustBeRemoved) {
-        // Delete the post
+      $remotePostID = get_post_meta($post->ID, "_ct_mls", true);
+      if (!in_array($remotePostID, $propertyIDs)) {
         wp_delete_post($post->ID);
       }
     }
@@ -465,9 +487,9 @@ class ApimoProrealestateSynchronizer
   {
     $headers = array(
       'Authorization' => 'Basic ' . base64_encode(
-          get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_provider'] . ':' .
+        get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_provider'] . ':' .
           get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_token']
-        ),
+      ),
       'content-type' => 'application/json',
     );
 
@@ -508,7 +530,7 @@ class ApimoProrealestateSynchronizer
   public function install()
   {
     if (!wp_next_scheduled('apimo_prorealestate_synchronizer_hourly_event')) {
-      wp_schedule_event(time(), 'daily', 'apimo_prorealestate_synchronizer_hourly_event');
+      wp_schedule_event(time(), '10min', 'apimo_prorealestate_synchronizer_hourly_event');
     }
   }
 
@@ -518,5 +540,7 @@ class ApimoProrealestateSynchronizer
   public function uninstall()
   {
     wp_clear_scheduled_hook('apimo_prorealestate_synchronizer_hourly_event');
+    delete_option('apimo_data_offset');
+    delete_transient('apimo_cached_data');
   }
 }
