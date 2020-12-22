@@ -170,7 +170,7 @@ class ApimoProrealestateSynchronizer
 
     if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
       error_log("Error fetching data");
-	    error_log($jsonBody);
+      error_log($jsonBody);
       return $jsonBody;
     }
 
@@ -186,11 +186,10 @@ class ApimoProrealestateSynchronizer
    */
   public function synchronize()
   {
-    set_time_limit(180);
     error_log("sync: start");
+    set_time_limit(180);
 
     $jsonBody = $this->getAPIMOData();
-
     if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
       return;
     }
@@ -203,14 +202,14 @@ class ApimoProrealestateSynchronizer
     if (is_array($properties)) {
       $updateProperties = array_slice($properties, $dataOffset, $dataLimit);
       foreach ($updateProperties as $property) {
+        error_log("start sync for " . isset($property->id) ? $property->id : "");
         // Parse the property object
         $data = $this->parseJSONOutput($property);
         if (null !== $data) {
           // Creates or updates a listing
-          error_log("start sync for " . $data['customMetaMLS']);
           $this->manageListingPost($data);
-          error_log("done sync for " . $data['customMetaMLS']);
         }
+        error_log("done sync for " . isset($property->id) ? $property->id : "");
       }
 
       foreach ($properties as $property) {
@@ -239,24 +238,23 @@ class ApimoProrealestateSynchronizer
       $baseCurrency = isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency'])
         ? get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency'] : '';
 
-      if($currency == '' || $baseCurrency == '' || $currency == $baseCurrency) {
-        error_log("Not calling anything ".$currency." ".$baseCurrency);
+      if ($currency == '' || $baseCurrency == '' || $currency == $baseCurrency) {
+        error_log("Not calling anything " . $currency . " " . $baseCurrency);
         return $value;
       }
 
       $apiKey = isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency_key'])
         ? get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency_key'] : '';
 
-      if($apiKey == '') {
+      if ($apiKey == '') {
         return $value;
       }
 
       $value = $value + 0; // convert to number
 
-      $value = $this->getCurrencyValue($apiKey,$baseCurrency,$value, $currency);
-      error_log("Final value ".$value);
+      $value = $this->getCurrencyValue($apiKey, $baseCurrency, $value, $currency);
+      error_log("Final value " . $value);
       return $value;
-
     }
   }
 
@@ -393,135 +391,140 @@ class ApimoProrealestateSynchronizer
       'post_status' => 'publish',
     );
 
-    // Verifies if the listing does not already exist
-    if ($postTitle != '') {
-      $post = get_page_by_title(htmlentities($postTitle), OBJECT, 'listings');
-
-      if (NULL === $post) {
-        // Insert post and retrieve postId
-        $postId = wp_insert_post($postInformation);
-      } else {
-        // Verifies if the property is not to old to be added
-        if (strtotime($postUpdatedAt) <= strtotime('-5 days')) {
-          return;
-        }
-
-        $postInformation['ID'] = $post->ID;
-        $postId = $post->ID;
-
-        // Update post
-        wp_update_post($postInformation);
-      }
-
-      // Delete attachments that has been removed
-      $attachments = get_attached_media('image', $postId);
-      foreach ($attachments as $attachment) {
-        $imageStillPresent = false;
-        foreach ($images as $image) {
-          if (
-            $attachment->post_content == $image['id'] &&
-            $this->getFileNameFromURL($attachment->guid) == $this->getFileNameFromURL($image['url'])
-          ) {
-            $imageStillPresent = true;
-          }
-        }
-        if (!$imageStillPresent) {
-          wp_delete_attachment($attachment->ID, TRUE);
-        }
-      }
-
-      // Updates the image and the featured image with the first given image
-      $imagesIds = array();
-
-      foreach ($images as $image) {
-        // Tries to retrieve an existing media
-        $media = $this->isMediaPosted($image['id']);
-
-        // If the media does not exist, upload it
-        if (!$media) {
-          $media_res = media_sideload_image($image['url'], $postId);
-
-          // Retrieve the last inserted media
-          $args = array(
-            'post_type' => 'attachment',
-            'numberposts' => 1,
-            'orderby' => 'date',
-            'order' => 'DESC',
-          );
-          $medias = get_posts($args);
-
-          // Just one media, but still an array returned by get_posts
-          foreach ($medias as $attachment) {
-            // Make sure the media's name is equal to the file name
-            wp_update_post(array(
-              'ID' => $attachment->ID,
-              'post_name' => $postTitle,
-              'post_title' => $postTitle,
-              'post_content' => $image['id'],
-            ));
-            $media = $attachment;
-          }
-        } else {
-          // Media already exists
-          // If media is not attched to any parent
-          if ($media->post_parent == 0) {
-            // Check if this image is attached to this post
-            $imageAttached = false;
-            foreach ($attachments as $attachment) {
-              if ($attachment->post_content == $image['id'] && $this->getFileNameFromURL($attachment->guid) == $this->getFileNameFromURL($image['url'])) {
-                $imageAttached = true;
-                break;
-              }
-            }
-            // Media already exists but is not attached to post
-            if (!$imageAttached) {
-              // attach media to this post
-              $update_media = array(
-                'ID' => $media->ID,
-                'post_parent' => $postId,
-              );
-
-              wp_update_post($update_media);
-            }
-          }
-        }
-
-        if (!empty($media) && !is_wp_error($media)) {
-          $imagesIds[$image['rank']] = $media->ID;
-        }
-
-        // Set the first image as the thumbnail
-        if ($image['rank'] == 1) {
-          set_post_thumbnail($postId, $media->ID);
-        }
-      }
-
-      $positions = implode(',', $imagesIds);
-      update_post_meta($postId, '_ct_images_position', $positions);
-
-      // Updates custom meta
-      update_post_meta($postId, '_ct_listing_alt_title', esc_attr(strip_tags($customMetaAltTitle)));
-      update_post_meta($postId, '_ct_price', esc_attr(strip_tags($ctPrice)));
-      update_post_meta($postId, '_ct_price_prefix', esc_attr(strip_tags($customMetaPricePrefix)));
-      update_post_meta($postId, '_ct_price_postfix', esc_attr(strip_tags($customMetaPricePostfix)));
-      update_post_meta($postId, '_ct_sqft', esc_attr(strip_tags($customMetaSqFt)));
-      update_post_meta($postId, '_ct_video', esc_attr(strip_tags($customMetaVideoURL)));
-      update_post_meta($postId, '_ct_mls', esc_attr(strip_tags($customMetaMLS)));
-      update_post_meta($postId, '_ct_latlng', esc_attr(strip_tags($customMetaLatLng)));
-      update_post_meta($postId, '_ct_listing_expire', esc_attr(strip_tags($customMetaExpireListing)));
-
-      // Updates custom taxonomies
-      wp_set_post_terms($postId, $ctPropertyType, 'property_type', FALSE);
-      wp_set_post_terms($postId, $beds, 'beds', FALSE);
-      wp_set_post_terms($postId, $customTaxBaths, 'baths', FALSE);
-      wp_set_post_terms($postId, $ctCtStatus, 'ct_status', FALSE);
-      wp_set_post_terms($postId, $customTaxState, 'state', FALSE);
-      wp_set_post_terms($postId, $customTaxCity, 'city', FALSE);
-      wp_set_post_terms($postId, $customTaxZip, 'zipcode', FALSE);
-      wp_set_post_terms($postId, $customTaxCountry, 'country', FALSE);
-      wp_set_post_terms($postId, $customTaxCommunity, 'community', FALSE);
-      wp_set_post_terms($postId, $rooms, 'additional_features', FALSE);
+    if (!$postTitle || $postTitle == "") {
+      error_log("Empty post title");
+      return;
     }
+
+    // Verifies if the listing does not already exist
+    $post = get_page_by_title(htmlentities($postTitle), OBJECT, 'listings');
+
+    if (NULL === $post) {
+      error_log("Post doesn't exist. Creating new");
+      // Insert post and retrieve postId
+      $postId = wp_insert_post($postInformation);
+    } else {
+      // Verifies if the property is not to old to be added
+      if (strtotime($postUpdatedAt) <= strtotime('-5 days')) {
+        error_log("Property too old to be updated");
+        return;
+      }
+
+      $postInformation['ID'] = $post->ID;
+      $postId = $post->ID;
+
+      // Update post
+      wp_update_post($postInformation);
+    }
+
+    // Delete attachments that has been removed
+    $attachments = get_attached_media('image', $postId);
+    foreach ($attachments as $attachment) {
+      $imageStillPresent = false;
+      foreach ($images as $image) {
+        if (
+          $attachment->post_content == $image['id'] &&
+          $this->getFileNameFromURL($attachment->guid) == $this->getFileNameFromURL($image['url'])
+        ) {
+          $imageStillPresent = true;
+        }
+      }
+      if (!$imageStillPresent) {
+        wp_delete_attachment($attachment->ID, TRUE);
+      }
+    }
+
+    // Updates the image and the featured image with the first given image
+    $imagesIds = array();
+
+    foreach ($images as $image) {
+      // Tries to retrieve an existing media
+      $media = $this->isMediaPosted($image['id']);
+
+      // If the media does not exist, upload it
+      if (!$media) {
+        $media_res = media_sideload_image($image['url'], $postId);
+
+        // Retrieve the last inserted media
+        $args = array(
+          'post_type' => 'attachment',
+          'numberposts' => 1,
+          'orderby' => 'date',
+          'order' => 'DESC',
+        );
+        $medias = get_posts($args);
+
+        // Just one media, but still an array returned by get_posts
+        foreach ($medias as $attachment) {
+          // Make sure the media's name is equal to the file name
+          wp_update_post(array(
+            'ID' => $attachment->ID,
+            'post_name' => $postTitle,
+            'post_title' => $postTitle,
+            'post_content' => $image['id'],
+          ));
+          $media = $attachment;
+        }
+      } else {
+        // Media already exists
+        // If media is not attched to any parent
+        if ($media->post_parent == 0) {
+          // Check if this image is attached to this post
+          $imageAttached = false;
+          foreach ($attachments as $attachment) {
+            if ($attachment->post_content == $image['id'] && $this->getFileNameFromURL($attachment->guid) == $this->getFileNameFromURL($image['url'])) {
+              $imageAttached = true;
+              break;
+            }
+          }
+          // Media already exists but is not attached to post
+          if (!$imageAttached) {
+            // attach media to this post
+            $update_media = array(
+              'ID' => $media->ID,
+              'post_parent' => $postId,
+            );
+
+            wp_update_post($update_media);
+          }
+        }
+      }
+
+      if (!empty($media) && !is_wp_error($media)) {
+        $imagesIds[$image['rank']] = $media->ID;
+      }
+
+      // Set the first image as the thumbnail
+      if ($image['rank'] == 1) {
+        set_post_thumbnail($postId, $media->ID);
+      }
+    }
+
+    $positions = implode(',', $imagesIds);
+    update_post_meta($postId, '_ct_images_position', $positions);
+
+    // Updates custom meta
+    update_post_meta($postId, '_ct_listing_alt_title', esc_attr(strip_tags($customMetaAltTitle)));
+    update_post_meta($postId, '_ct_price', esc_attr(strip_tags($ctPrice)));
+    update_post_meta($postId, '_ct_price_prefix', esc_attr(strip_tags($customMetaPricePrefix)));
+    update_post_meta($postId, '_ct_price_postfix', esc_attr(strip_tags($customMetaPricePostfix)));
+    update_post_meta($postId, '_ct_sqft', esc_attr(strip_tags($customMetaSqFt)));
+    update_post_meta($postId, '_ct_video', esc_attr(strip_tags($customMetaVideoURL)));
+    update_post_meta($postId, '_ct_mls', esc_attr(strip_tags($customMetaMLS)));
+    update_post_meta($postId, '_ct_latlng', esc_attr(strip_tags($customMetaLatLng)));
+    update_post_meta($postId, '_ct_listing_expire', esc_attr(strip_tags($customMetaExpireListing)));
+
+    // Updates custom taxonomies
+    wp_set_post_terms($postId, $ctPropertyType, 'property_type', FALSE);
+    wp_set_post_terms($postId, $beds, 'beds', FALSE);
+    wp_set_post_terms($postId, $customTaxBaths, 'baths', FALSE);
+    wp_set_post_terms($postId, $ctCtStatus, 'ct_status', FALSE);
+    wp_set_post_terms($postId, $customTaxState, 'state', FALSE);
+    wp_set_post_terms($postId, $customTaxCity, 'city', FALSE);
+    wp_set_post_terms($postId, $customTaxZip, 'zipcode', FALSE);
+    wp_set_post_terms($postId, $customTaxCountry, 'country', FALSE);
+    wp_set_post_terms($postId, $customTaxCommunity, 'community', FALSE);
+    wp_set_post_terms($postId, $rooms, 'additional_features', FALSE);
   }
 
   /**
@@ -640,12 +643,11 @@ class ApimoProrealestateSynchronizer
    */
   public function install()
   {
-	  error_log("Installing APIMO");
+    error_log("Installing APIMO");
     if (!wp_next_scheduled('apimo_prorealestate_synchronizer_hourly_event')) {
-			  error_log("Setting event");
+      error_log("Setting event");
       wp_schedule_event(time(), '10min', 'apimo_prorealestate_synchronizer_hourly_event');
-			  error_log("Install APIMO Done");
-
+      error_log("Install APIMO Done");
     }
   }
 
