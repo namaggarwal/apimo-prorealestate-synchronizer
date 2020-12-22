@@ -96,6 +96,54 @@ class ApimoProrealestateSynchronizer
     return $schedules;
   }
 
+  private function callCurrencyConverter($apiKey, $baseCurrency)
+  {
+    $request = new WP_Http;
+    $response = $request->request("https://v6.exchangerate-api.com/v6/" . $apiKey . "/latest/" . $baseCurrency, array(
+      'method' => "GET",
+    ));
+
+    if (is_array($response) && !is_wp_error($response)) {
+      if ($response["response"]["code"] != 200) {
+        return array(
+          'status' => $response["response"]["code"],
+          'body' => "Invalid"
+        );
+      }
+
+      return array(
+        'status' => $response["response"]["code"],
+        'body' => json_decode($response["body"]),
+      );
+    } else {
+      return array(
+        'status' => 500,
+        'body' => $response->get_error_message()
+      );
+    }
+  }
+
+  private function getCurrencyValue($apiKey, $reqCurrency, $originalValue, $originalCurrency)
+  {
+    if (false === ($rates = get_transient('currency_data'))) {
+      error_log("Currency data not available");
+      $data = $this->callCurrencyConverter($apiKey, $reqCurrency);
+      if ($data['status'] != 200) {
+        error_log("Currency data failed");
+        return $originalValue;
+      }
+      $rates = $data['body']->conversion_rates;
+      set_transient("currency_data", $rates, 3600 * 24);
+    }
+
+    if (!isset($rates->$originalCurrency)) {
+      error_log("Currency not available");
+      return $originalValue;
+    }
+
+    return round($originalValue / $rates->$originalCurrency);
+  }
+
   private function getAPIMOData()
   {
     $data = get_transient('apimo_cached_data');
@@ -122,6 +170,7 @@ class ApimoProrealestateSynchronizer
 
     if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
       error_log("Error fetching data");
+	    error_log($jsonBody);
       return $jsonBody;
     }
 
@@ -138,7 +187,6 @@ class ApimoProrealestateSynchronizer
   public function synchronize()
   {
     set_time_limit(180);
-
     error_log("sync: start");
 
     $jsonBody = $this->getAPIMOData();
@@ -151,7 +199,7 @@ class ApimoProrealestateSynchronizer
     $propertyIDs = array();
     $dataOffset = get_option('apimo_data_offset', 0);
     $dataLimit = get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_limit'];
-    error_log("Data offset is ".$dataOffset);
+    error_log("Data offset is " . $dataOffset);
     if (is_array($properties)) {
       $updateProperties = array_slice($properties, $dataOffset, $dataLimit);
       foreach ($updateProperties as $property) {
@@ -159,9 +207,9 @@ class ApimoProrealestateSynchronizer
         $data = $this->parseJSONOutput($property);
         if (null !== $data) {
           // Creates or updates a listing
-          error_log("start sync for ".$data['customMetaMLS']);
+          error_log("start sync for " . $data['customMetaMLS']);
           $this->manageListingPost($data);
-          error_log("done sync for ".$data['customMetaMLS']);
+          error_log("done sync for " . $data['customMetaMLS']);
         }
       }
 
@@ -178,9 +226,38 @@ class ApimoProrealestateSynchronizer
       }
 
       update_option('apimo_data_offset', $dataOffset);
-      error_log("Next data offset is ".$dataOffset);
+      error_log("Next data offset is " . $dataOffset);
     }
     error_log("sync: end");
+  }
+
+  private function getPropertyPrice($value, $currency)
+  {
+    if (!$value) {
+      return  __('Price on ask');
+    } else {
+      $baseCurrency = isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency'])
+        ? get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency'] : '';
+
+      if($currency == '' || $baseCurrency == '' || $currency == $baseCurrency) {
+        error_log("Not calling anything ".$currency." ".$baseCurrency);
+        return $value;
+      }
+
+      $apiKey = isset(get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency_key'])
+        ? get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_currency_key'] : '';
+
+      if($apiKey == '') {
+        return $value;
+      }
+
+      $value = $value + 0; // convert to number
+
+      $value = $this->getCurrencyValue($apiKey,$baseCurrency,$value, $currency);
+      error_log("Final value ".$value);
+      return $value;
+
+    }
   }
 
   /**
@@ -192,6 +269,9 @@ class ApimoProrealestateSynchronizer
    */
   private function parseJSONOutput($property)
   {
+
+    $price = $this->getPropertyPrice($property->price->value, $property->price->currency);
+
     $data = array(
       'user' => $property->user,
       'updated_at' => $property->updated_at,
@@ -199,7 +279,7 @@ class ApimoProrealestateSynchronizer
       'postContent' => array(),
       'images' => array(),
       'customMetaAltTitle' => $property->address,
-      'customMetaPrice' => (!$property->price->value ? __('Price on ask') : $property->price->value),
+      'customMetaPrice' => $price,
       'customMetaPricePrefix' => '',
       'customMetaPricePostfix' => '',
       'customMetaSqFt' => preg_replace('#,#', '.', $property->area->value),
@@ -315,14 +395,14 @@ class ApimoProrealestateSynchronizer
 
     // Verifies if the listing does not already exist
     if ($postTitle != '') {
-      $post = get_page_by_title($postTitle, OBJECT, 'listings');
+      $post = get_page_by_title(htmlentities($postTitle), OBJECT, 'listings');
 
       if (NULL === $post) {
         // Insert post and retrieve postId
         $postId = wp_insert_post($postInformation);
       } else {
         // Verifies if the property is not to old to be added
-        if (strtotime($postUpdatedAt) >= strtotime('-5 days')) {
+        if (strtotime($postUpdatedAt) <= strtotime('-5 days')) {
           return;
         }
 
@@ -380,6 +460,29 @@ class ApimoProrealestateSynchronizer
               'post_content' => $image['id'],
             ));
             $media = $attachment;
+          }
+        } else {
+          // Media already exists
+          // If media is not attched to any parent
+          if ($media->post_parent == 0) {
+            // Check if this image is attached to this post
+            $imageAttached = false;
+            foreach ($attachments as $attachment) {
+              if ($attachment->post_content == $image['id'] && $this->getFileNameFromURL($attachment->guid) == $this->getFileNameFromURL($image['url'])) {
+                $imageAttached = true;
+                break;
+              }
+            }
+            // Media already exists but is not attached to post
+            if (!$imageAttached) {
+              // attach media to this post
+              $update_media = array(
+                'ID' => $media->ID,
+                'post_parent' => $postId,
+              );
+
+              wp_update_post($update_media);
+            }
           }
         }
 
@@ -537,8 +640,12 @@ class ApimoProrealestateSynchronizer
    */
   public function install()
   {
+	  error_log("Installing APIMO");
     if (!wp_next_scheduled('apimo_prorealestate_synchronizer_hourly_event')) {
+			  error_log("Setting event");
       wp_schedule_event(time(), '10min', 'apimo_prorealestate_synchronizer_hourly_event');
+			  error_log("Install APIMO Done");
+
     }
   }
 

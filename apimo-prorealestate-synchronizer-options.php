@@ -37,7 +37,7 @@ class ApimoProrealestateSynchronizerSettingsPage
     {
         // Set class property
         $this->options = get_option('apimo_prorealestate_synchronizer_settings_options');
-        ?>
+?>
         <div class="wrap">
             <h1>Apimo API & WP Pro Real Estate 7 synchronizer settings</h1>
             <form method="post" action="options.php">
@@ -49,7 +49,7 @@ class ApimoProrealestateSynchronizerSettingsPage
                 ?>
             </form>
         </div>
-        <?php
+<?php
     }
 
     /**
@@ -102,6 +102,21 @@ class ApimoProrealestateSynchronizerSettingsPage
             'apimo_prorealestate_synchronizer_settings_options_group_section'
         );
 
+        add_settings_field(
+            'apimo_data_currency',
+            'Base Currency',
+            array($this, 'currency_callback'),
+            'apimo-prorealestate-synchronizer-settings',
+            'apimo_prorealestate_synchronizer_settings_options_group_section'
+        );
+
+        add_settings_field(
+            'apimo_data_currency_key',
+            'Currency Key',
+            array($this, 'currency_key_callback'),
+            'apimo-prorealestate-synchronizer-settings',
+            'apimo_prorealestate_synchronizer_settings_options_group_section'
+        );
     }
 
     /**
@@ -123,6 +138,13 @@ class ApimoProrealestateSynchronizerSettingsPage
 
         if (isset($input['apimo_data_limit']))
             $new_input['apimo_data_limit'] = sanitize_text_field($input['apimo_data_limit']);
+
+        if (isset($input['apimo_data_currency']))
+            $new_input['apimo_data_currency'] = sanitize_text_field($input['apimo_data_currency']);
+
+        if (isset($input['apimo_data_currency_key']))
+            $new_input['apimo_data_currency_key'] = sanitize_text_field($input['apimo_data_currency_key']);
+
 
         return $new_input;
     }
@@ -167,6 +189,22 @@ class ApimoProrealestateSynchronizerSettingsPage
         printf(
             '<input type="number" id="apimo_data_limit" name="apimo_prorealestate_synchronizer_settings_options[apimo_data_limit]" value="%s" />',
             isset($this->options['apimo_data_limit']) ? esc_attr($this->options['apimo_data_limit']) : '10'
+        );
+    }
+
+    public function currency_callback()
+    {
+        printf(
+            '<input type="text" id="apimo_data_currency" name="apimo_prorealestate_synchronizer_settings_options[apimo_data_currency]" value="%s" />',
+            isset($this->options['apimo_data_currency']) ? esc_attr($this->options['apimo_data_currency']) : ''
+        );
+    }
+
+    public function currency_key_callback()
+    {
+        printf(
+            '<input type="text" id="apimo_data_currency_key" name="apimo_prorealestate_synchronizer_settings_options[apimo_data_currency_key]" value="%s" />',
+            isset($this->options['apimo_data_currency_key']) ? esc_attr($this->options['apimo_data_currency_key']) : ''
         );
     }
 }
