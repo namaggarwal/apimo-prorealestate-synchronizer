@@ -101,6 +101,7 @@ class ApimoProrealestateSynchronizer
     $data = get_transient('apimo_cached_data');
 
     if ($data) {
+      error_log("Found data from cache");
       return $data;
     }
 
@@ -120,6 +121,7 @@ class ApimoProrealestateSynchronizer
     $jsonBody = json_decode($return['body']);
 
     if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
+      error_log("Error fetching data");
       return $jsonBody;
     }
 
@@ -137,6 +139,8 @@ class ApimoProrealestateSynchronizer
   {
     set_time_limit(180);
 
+    error_log("sync: start");
+
     $jsonBody = $this->getAPIMOData();
 
     if (!is_object($jsonBody) || !isset($jsonBody->properties)) {
@@ -147,7 +151,7 @@ class ApimoProrealestateSynchronizer
     $propertyIDs = array();
     $dataOffset = get_option('apimo_data_offset', 0);
     $dataLimit = get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_data_limit'];
-
+    error_log("Data offset is ".$dataOffset);
     if (is_array($properties)) {
       $updateProperties = array_slice($properties, $dataOffset, $dataLimit);
       foreach ($updateProperties as $property) {
@@ -155,7 +159,9 @@ class ApimoProrealestateSynchronizer
         $data = $this->parseJSONOutput($property);
         if (null !== $data) {
           // Creates or updates a listing
+          error_log("start sync for ".$data['customMetaMLS']);
           $this->manageListingPost($data);
+          error_log("done sync for ".$data['customMetaMLS']);
         }
       }
 
@@ -172,7 +178,9 @@ class ApimoProrealestateSynchronizer
       }
 
       update_option('apimo_data_offset', $dataOffset);
+      error_log("Next data offset is ".$dataOffset);
     }
+    error_log("sync: end");
   }
 
   /**
