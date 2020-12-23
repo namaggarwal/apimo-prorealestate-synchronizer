@@ -202,14 +202,14 @@ class ApimoProrealestateSynchronizer
     if (is_array($properties)) {
       $updateProperties = array_slice($properties, $dataOffset, $dataLimit);
       foreach ($updateProperties as $property) {
-        error_log("start sync for " . isset($property->id) ? $property->id : "");
+        error_log("start sync for " . (isset($property->id) ? $property->id : ""));
         // Parse the property object
         $data = $this->parseJSONOutput($property);
         if (null !== $data) {
           // Creates or updates a listing
           $this->manageListingPost($data);
         }
-        error_log("done sync for " . isset($property->id) ? $property->id : "");
+        error_log("done sync for " . (isset($property->id) ? $property->id : ""));
       }
 
       foreach ($properties as $property) {
