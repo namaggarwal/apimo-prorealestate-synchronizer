@@ -299,6 +299,8 @@ class ApimoProrealestateSynchronizer
       'customTaxCountry' => $property->country,
       'customTaxCommunity' => '',
       'customTaxFeat' => '',
+      'customFeatures' => [],
+      'customSubType' => isset($property->subtype) ? $property->subtype : 0,
     );
 
     foreach ($property->comments as $comment) {
@@ -332,6 +334,14 @@ class ApimoProrealestateSynchronizer
         'url' => $picture->url,
         'rank' => $picture->rank
       );
+    }
+
+    if ($property->services && is_array($property->services)) {
+      $customServices = [];
+      foreach ($property->services as $service) {
+        $customServices[] = $service;
+      }
+      $data["customFeatures"] = $customServices;
     }
 
     return $data;
@@ -382,6 +392,8 @@ class ApimoProrealestateSynchronizer
     $customTaxCountry = $data['customTaxCountry'];
     $customTaxCommunity = $data['customTaxCommunity'];
     $customTaxFeat = $data['customTaxFeat'];
+    $customFeatures = $data['customFeatures'];
+    $customSubType = $data['customSubType'];
 
     // Creates a listing post
     $postInformation = array(
@@ -515,7 +527,7 @@ class ApimoProrealestateSynchronizer
     update_post_meta($postId, '_ct_listing_expire', esc_attr(strip_tags($customMetaExpireListing)));
 
     // Updates custom taxonomies
-    wp_set_post_terms($postId, $ctPropertyType, 'property_type', FALSE);
+    //wp_set_post_terms($postId, $ctPropertyType, 'property_type', FALSE);
     wp_set_post_terms($postId, $beds, 'beds', FALSE);
     wp_set_post_terms($postId, $customTaxBaths, 'baths', FALSE);
     wp_set_post_terms($postId, $ctCtStatus, 'ct_status', FALSE);
@@ -525,6 +537,76 @@ class ApimoProrealestateSynchronizer
     wp_set_post_terms($postId, $customTaxCountry, 'country', FALSE);
     wp_set_post_terms($postId, $customTaxCommunity, 'community', FALSE);
     wp_set_post_terms($postId, $rooms, 'additional_features', FALSE);
+
+    if (count($customFeatures) > 0) {
+      $features = [
+        4 => 1789,
+        15 => 1790,
+        27 => 1791,
+        11 => 1792,
+        1 => 1793,
+        28 => 1794,
+        47 => 1795,
+        46 => 1796,
+        18 => 1797,
+        20 => 1798,
+        31 => 1799,
+        26 => 1800,
+        19 => 1801,
+        116 => 1802,
+        23 => 1803,
+        24 => 1804,
+        17 => 1805,
+        14 => 1806,
+        44 => 1807,
+        74 => 1808,
+        29 => 1809,
+        3 => 1810,
+        6 => 1811,
+        112 => 1812,
+        5 => 1813,
+        34 => 1814,
+        7 => 1815,
+        16 => 1816,
+        12 => 1817,
+        37 => 1818,
+        45 => 1819,
+        13 => 1820,
+        36 => 1821,
+        83 => 1822,
+        82 => 1823,
+        44 => 1824,
+        46 => 1825,
+      ];
+      $feature_list = [];
+      foreach ($customFeatures as $feature) {
+        if (isset($features[$feature])) {
+          $feature_list[] = $features[$feature];
+        }
+      }
+
+      if (count($feature_list) > 0) {
+        wp_set_post_terms($postId, $feature_list, 'additional_features', false);
+      }
+    }
+
+    $propertyTypeMap = [
+      2 => 1051,
+      4 => 665,
+      5 => 459,
+      8 => 1786,
+      9 => 665,
+      12 => 665,
+      14 => 1788,
+      44 => 1787,
+      46 => 1051,
+      49 => 654,
+      68 => 665,
+    ];
+    if(isset($propertyTypeMap[$customSubType])) {
+      wp_set_post_terms($postId, $propertyTypeMap[$customSubType], 'property_type', false);
+    }
+
   }
 
   /**
