@@ -409,7 +409,7 @@ class ApimoProrealestateSynchronizer
     }
 
     // Verifies if the listing does not already exist
-    $post = get_page_by_title(htmlentities($postTitle), OBJECT, 'listings');
+    $post = get_page_by_title(html_entity_decode($postTitle), OBJECT, 'listings');
 
     if (NULL === $post) {
       error_log("Post doesn't exist. Creating new");
