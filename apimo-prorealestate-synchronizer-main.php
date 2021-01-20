@@ -474,6 +474,7 @@ class ApimoProrealestateSynchronizer
             'post_name' => $postTitle,
             'post_title' => $postTitle,
             'post_content' => $image['id'],
+            'menu_order' => $image['rank'],
           ));
           $media = $attachment;
         }
@@ -495,6 +496,7 @@ class ApimoProrealestateSynchronizer
             $update_media = array(
               'ID' => $media->ID,
               'post_parent' => $postId,
+              'menu_order' => $image['rank'],
             );
 
             wp_update_post($update_media);
