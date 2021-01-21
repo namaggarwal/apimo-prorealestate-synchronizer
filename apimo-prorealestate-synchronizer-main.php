@@ -52,6 +52,36 @@ class ApimoProrealestateSynchronizer
         //add_action('init', array($this, 'synchronize'));
       }
     }
+    add_action('wp_ajax_apimo_sync_single_property', array($this, 'sync_single_property'));
+  }
+
+  public function sync_single_property()
+  {
+    $propertyID = isset($_POST["propertyID"]) ? $_POST["propertyID"] : 0;
+    if ($propertyID  == 0) {
+      wp_send_json_error();
+      return;
+    }
+
+    $property = $this->getAPIMOSingleProperty($propertyID);
+    if (is_wp_error($property)) {
+      wp_send_json_error();
+      return;
+    }
+    error_log("start sync for " . (isset($property->id) ? $property->id : "Unknown"));
+
+    $data = $this->parseJSONOutput($property);
+    if (null !== $data) {
+      error_log(print_r($data, true));
+      // Creates or updates a listing
+      $this->manageListingPost($data, true);
+    } else {
+      error_log("Data is null");
+      wp_send_json_error();
+      return;
+    }
+    error_log("done sync for " . $data['customMetaMLS']);
+    wp_send_json_success();
   }
 
   /**
@@ -175,6 +205,27 @@ class ApimoProrealestateSynchronizer
     }
 
     set_transient('apimo_cached_data', $jsonBody, 7200);
+
+    return $jsonBody;
+  }
+
+  private function getAPIMOSingleProperty($propertyID)
+  {
+    // Gets the properties
+    $return = $this->callApimoAPI(
+      'https://api.apimo.pro/agencies/'
+        . get_option('apimo_prorealestate_synchronizer_settings_options')['apimo_api_agency']
+        . '/properties/' . $propertyID,
+      'GET'
+    );
+
+    // Parses the JSON into an array of properties object
+    $jsonBody = json_decode($return['body']);
+
+    if (!is_object($jsonBody)) {
+      error_log("Error calling API");
+      return new WP_Error("Error calling API");
+    }
 
     return $jsonBody;
   }
@@ -352,7 +403,7 @@ class ApimoProrealestateSynchronizer
    *
    * @param array $data
    */
-  private function manageListingPost($data)
+  private function manageListingPost($data, $isForce = false)
   {
     // Converts the data for later use
     $postTitle = $data['postTitle'][$this->siteLanguage];
@@ -417,7 +468,7 @@ class ApimoProrealestateSynchronizer
       $postId = wp_insert_post($postInformation);
     } else {
       // Verifies if the property is not to old to be added
-      if (strtotime($postUpdatedAt) <= strtotime('-5 days')) {
+      if (!$isForce && strtotime($postUpdatedAt) <= strtotime('-5 days')) {
         error_log("Property too old to be updated");
         return;
       }
@@ -496,6 +547,15 @@ class ApimoProrealestateSynchronizer
             $update_media = array(
               'ID' => $media->ID,
               'post_parent' => $postId,
+              'menu_order' => $image['rank'],
+            );
+
+            wp_update_post($update_media);
+          }
+        } else if ($media->post_parent == $postId) {
+          if ($isForce) {
+            $update_media = array(
+              'ID' => $media->ID,
               'menu_order' => $image['rank'],
             );
 
