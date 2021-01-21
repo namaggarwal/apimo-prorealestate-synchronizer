@@ -48,6 +48,39 @@ class ApimoProrealestateSynchronizerSettingsPage
                 submit_button();
                 ?>
             </form>
+            <div>
+                <input id="apimo_property_id" placeholder="Enter a property id" />
+                <button type="button" id="apimo_individual_sync">Sync</button>
+                <script type="text/javascript">
+                    function onAPIMOSingleItemSyncClick(){
+                        var propertyID = jQuery("#apimo_property_id").val();
+                        var apimo_admin_url = "<?php echo admin_url('admin-ajax.php') ?>";
+
+                        const data = {
+                            action: "apimo_sync_single_property",
+                            propertyID,
+                        };
+                        const encoded_data = Object.keys(data)
+                            .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(data[k])}`)
+                            .join("&");
+
+                        return fetch(apimo_admin_url, {
+                            method: "POST",
+                            body: encoded_data,
+                            headers: {
+                            "Content-type": "application/x-www-form-urlencoded",
+                            },
+                        });
+
+                    }
+                    function addAPIMOSingleSyncEvent() {
+                        jQuery("#apimo_individual_sync").on("click", onAPIMOSingleItemSyncClick);
+                    }
+                    ((function(){
+                        addAPIMOSingleSyncEvent();
+                    }))();
+                </script>
+            </div>
         </div>
 <?php
     }
